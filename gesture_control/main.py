@@ -20,10 +20,8 @@ def main():
     detector = HandDetector()
     recognizer = GestureRecognizer()
     activation = ActivationManager()
-    last_scroll_y = None      # 用于滚动检测
+    last_palm_y = None        # 用于滚动检测
     last_fist_time = 0        # 记录上次握拳时长
-    scroll_mode = False       # 滚动模式
-    one_finger_start = None   # 单指开始时间
 
     # 初始化摄像头
     cap = cv2.VideoCapture(CAMERA_ID)
@@ -35,12 +33,13 @@ def main():
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
     pinned = False  # 置顶状态
 
-    print("\n手势控制:")
-    print("  Palm  -> Activate")
-    print("  Fist 0.5s -> Pause  |  3s -> Fullscreen")
-    print("  1 Finger -> Scroll")
-    print("  2 Fingers -> Rewind 20s")
-    print("  3 Fingers -> Forward 20s")
+    print("\nGesture Control:")
+    print("  Palm 1.5s -> Activate")
+    print("  [After Activate]")
+    print("    Palm move -> Scroll")
+    print("    Fist 0.5s -> Pause  |  3s -> Fullscreen")
+    print("    2 Fingers -> Rewind 20s")
+    print("    3 Fingers -> Forward 20s")
     print("\nKeys: 'p' = pin/unpin  |  'q' = quit\n")
 
     # 主循环
@@ -67,94 +66,83 @@ def main():
         cv2.putText(frame, f"Gesture: {gesture_name}", (10, h - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
-        # 单指滚动（独立于激活状态）
-        if gesture == GestureType.ONE_FINGER:
-            current_time = __import__('time').time()
-            if one_finger_start is None:
-                one_finger_start = current_time
-
-            hold_time = current_time - one_finger_start
-
-            if hold_time >= 1.5:
-                scroll_mode = True
-
-            if scroll_mode:
-                current_y = points.get('index_y', 0)
-                if last_scroll_y is not None:
-                    dy = last_scroll_y - current_y
-                    if abs(dy) > 5:
-                        pyautogui.scroll(int(dy / 3))
-                        action = "Scroll Up" if dy > 0 else "Scroll Down"
-                last_scroll_y = current_y
-                _draw_status(frame, "Scroll Mode", action or "Move finger up/down", (255, 150, 0))
+        # 根据状态绘制不同的 UI
+        action = ""
+        if not act['activated']:
+            if act['activation_progress'] > 0:
+                _draw_activating(frame, act['activation_progress'])
             else:
-                progress = hold_time / 1.5
-                _draw_status(frame, "Hold 1 Finger", f"{hold_time:.1f}s / 1.5s", (100, 100, 100))
-                _draw_action_progress(frame, progress)
-                last_scroll_y = None
+                _draw_inactive(frame, gesture_name)
+            last_palm_y = None
         else:
-            one_finger_start = None
-            if scroll_mode and gesture != GestureType.ONE_FINGER:
-                scroll_mode = False
-                last_scroll_y = None
-
-        # 根据状态绘制不同的 UI（非滚动模式）
-        if gesture != GestureType.ONE_FINGER:
-            action = ""
-            if not act['activated']:
-                if act['activation_progress'] > 0:
-                    _draw_activating(frame, act['activation_progress'])
-                elif not scroll_mode:
-                    _draw_inactive(frame, gesture_name)
+            # Activated
+            if not act['ready_for_action']:
+                _draw_status(frame, "Active", "Release hand to start", (0, 200, 0))
+                last_palm_y = None
             else:
-                # Activated
-                if not act['ready_for_action']:
-                    _draw_status(frame, "Active", "Release hand to start", (0, 200, 0))
-                else:
-                    # FIST: >=3s立即全屏, 0.5-3s松手暂停
-                    if gesture == GestureType.FIST:
-                        fist_time = activation.get_hold_time(gesture)
-                        last_fist_time = fist_time
+                # 先检查：松开握拳时触发暂停
+                if gesture != GestureType.FIST and last_fist_time >= 0.5 and last_fist_time < 3.0:
+                    pyautogui.press('space')
+                    _draw_status(frame, "Active", "Play/Pause", (0, 200, 0))
+                    last_fist_time = 0
+                    last_palm_y = None
 
-                        if fist_time >= 3.0 and not activation.action_triggered:
-                            pyautogui.press('f')
-                            activation.action_triggered = True
-                            _draw_status(frame, "Active", "Fullscreen!", (0, 200, 0))
-                        else:
-                            progress = min(fist_time / 3.0, 1.0)
-                            _draw_status(frame, "Active", f"Fist {fist_time:.1f}s", (0, 200, 0))
-                            _draw_action_progress(frame, progress)
+                # OPEN_PALM: 滚动页面
+                elif gesture == GestureType.OPEN_PALM:
+                    palm_y = points.get('index_y', h // 2)
+                    if last_palm_y is not None:
+                        dy = last_palm_y - palm_y
+                        if abs(dy) > 8:
+                            scroll_amount = int(dy / 2)
+                            pyautogui.scroll(scroll_amount)
+                            action = "Scroll Up" if dy > 0 else "Scroll Down"
+                    last_palm_y = palm_y
+                    _draw_status(frame, "Active", action or "Palm: Scroll", (0, 200, 0))
+                    last_fist_time = 0
 
-                    # 松手时：如果 0.5-3秒 且没触发过全屏，则暂停
-                    elif last_fist_time >= 0.5 and last_fist_time < 3.0:
-                        pyautogui.press('space')
-                        _draw_status(frame, "Active", "Play/Pause", (0, 200, 0))
-                        last_fist_time = 0
+                # FIST: >=3s立即全屏
+                elif gesture == GestureType.FIST:
+                    fist_time = activation.get_hold_time(gesture)
+                    last_fist_time = fist_time
+                    last_palm_y = None
 
-                    # TWO_FINGER: rewind 20s
-                    elif gesture == GestureType.TWO_FINGER:
-                        hold_time = activation.get_hold_time(gesture)
-                        if hold_time >= 0.5 and not activation.action_triggered:
-                            for _ in range(4):
-                                pyautogui.press('left')
-                            activation.action_triggered = True
-                            action = "Rewind 20s"
-                        _draw_status(frame, "Active", action or f"Rewind {int(hold_time/0.5*100)}%", (0, 200, 0))
-                        _draw_action_progress(frame, min(hold_time/0.5, 1.0))
-
-                    # THREE_FINGER: forward 20s
-                    elif gesture == GestureType.THREE_FINGER:
-                        hold_time = activation.get_hold_time(gesture)
-                        if hold_time >= 0.5 and not activation.action_triggered:
-                            for _ in range(4):
-                                pyautogui.press('right')
-                            activation.action_triggered = True
-                            action = "Forward 20s"
-                        _draw_status(frame, "Active", action or f"Forward {int(hold_time/0.5*100)}%", (0, 200, 0))
-                        _draw_action_progress(frame, min(hold_time/0.5, 1.0))
-
+                    if fist_time >= 3.0 and not activation.action_triggered:
+                        pyautogui.press('f')
+                        activation.action_triggered = True
+                        _draw_status(frame, "Active", "Fullscreen!", (0, 200, 0))
                     else:
-                        _draw_status(frame, "Active", "Fist|2F|3F", (0, 200, 0))
+                        progress = min(fist_time / 3.0, 1.0)
+                        _draw_status(frame, "Active", f"Fist {fist_time:.1f}s", (0, 200, 0))
+                        _draw_action_progress(frame, progress)
+                    last_palm_y = None
+
+                # TWO_FINGER: rewind 20s
+                elif gesture == GestureType.TWO_FINGER:
+                    hold_time = activation.get_hold_time(gesture)
+                    if hold_time >= 0.5 and not activation.action_triggered:
+                        for _ in range(4):
+                            pyautogui.press('left')
+                        activation.action_triggered = True
+                        action = "Rewind 20s"
+                    _draw_status(frame, "Active", action or f"Rewind {int(hold_time/0.5*100)}%", (0, 200, 0))
+                    _draw_action_progress(frame, min(hold_time/0.5, 1.0))
+                    last_palm_y = None
+
+                # THREE_FINGER: forward 20s
+                elif gesture == GestureType.THREE_FINGER:
+                    hold_time = activation.get_hold_time(gesture)
+                    if hold_time >= 0.5 and not activation.action_triggered:
+                        for _ in range(4):
+                            pyautogui.press('right')
+                        activation.action_triggered = True
+                        action = "Forward 20s"
+                    _draw_status(frame, "Active", action or f"Forward {int(hold_time/0.5*100)}%", (0, 200, 0))
+                    _draw_action_progress(frame, min(hold_time/0.5, 1.0))
+                    last_palm_y = None
+
+                else:
+                    _draw_status(frame, "Active", "Palm|Fist|2F|3F", (0, 200, 0))
+                    last_palm_y = None
 
         # 显示置顶状态
         if pinned:
