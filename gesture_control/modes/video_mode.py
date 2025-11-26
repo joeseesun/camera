@@ -6,7 +6,7 @@ import time
 import pyautogui
 from .base_mode import BaseMode
 from ..core.gestures import GestureType
-from ..config import ACTION_COOLDOWN
+from ..config import ACTION_COOLDOWN, VIDEO_SEEK_TIMES
 
 
 class VideoMode(BaseMode):
@@ -20,47 +20,74 @@ class VideoMode(BaseMode):
         self.last_action_time = 0
         self.last_action = ""
 
-    def handle_gesture(self, gesture: GestureType, points: dict) -> str:
-        """处理手势，执行视频控制"""
+    def handle_gesture(self, gesture: GestureType, points: dict,
+                       action_confirmed: bool = False) -> str:
+        """
+        处理手势，执行视频控制
+
+        Args:
+            gesture: 手势类型
+            points: 手势坐标
+            action_confirmed: 是否已确认动作（保持足够时间）
+        """
         current_time = time.time()
-        
+
         # 冷却检查
         if current_time - self.last_action_time < ACTION_COOLDOWN:
             return ""
 
         action = ""
-        
+
+        if not action_confirmed:
+            return ""
+
+        # ✊ 握拳 → 播放/暂停
         if gesture == GestureType.FIST:
-            # 握拳 → 播放/暂停 (空格键)
             pyautogui.press('space')
             action = "⏯️ 播放/暂停"
-            
-        elif gesture == GestureType.SWIPE_RIGHT:
-            # 向右挥 → 快进 (按 L 键，YouTube 快进 10 秒，按 3 次 = 30 秒)
-            for _ in range(3):
-                pyautogui.press('l')
-            action = "⏩ 快进 30 秒"
-            
-        elif gesture == GestureType.SWIPE_LEFT:
-            # 向左挥 → 快退 (按 J 键)
-            for _ in range(3):
-                pyautogui.press('j')
-            action = "⏪ 快退 30 秒"
+
+        # ☝️ 单指 → 快退20秒
+        elif gesture == GestureType.POINTING:
+            pyautogui.press('left')
+            pyautogui.press('left')
+            pyautogui.press('left')
+            pyautogui.press('left')
+            action = "⏪ 快退 20s"
+
+        # ✌️ 双指 → 快进20秒
+        elif gesture == GestureType.PEACE:
+            pyautogui.press('right')
+            pyautogui.press('right')
+            pyautogui.press('right')
+            pyautogui.press('right')
+            action = "⏩ 快进 20s"
 
         if action:
             self.last_action_time = current_time
             self.last_action = action
-            
+
         return action
+
+    def play_pause(self) -> str:
+        """播放/暂停"""
+        pyautogui.press('space')
+        self.last_action = "⏯️ 播放/暂停"
+        return self.last_action
+
+    def fullscreen(self) -> str:
+        """全屏切换"""
+        pyautogui.press('f')
+        self.last_action = "🖥️ 全屏"
+        return self.last_action
 
     def get_overlay_info(self) -> dict:
         """返回覆盖层信息"""
         return {
             'mode_name': self.name,
             'hints': [
-                "✊ 握拳 → 播放/暂停",
-                "👉 右挥 → 快进 30s",
-                "👈 左挥 → 快退 30s",
+                "✊ 握拳 → 暂停",
+                "☝️ 单指 → 快退20s",
+                "✌️ 双指 → 快进20s",
             ],
             'last_action': self.last_action,
         }

@@ -26,12 +26,12 @@ class HandDetector:
     def detect(self, frame):
         """
         检测手部关键点
-        
+
         Args:
             frame: BGR 格式的图像帧
-            
+
         Returns:
-            landmarks: 手部关键点列表，如果没有检测到则返回 None
+            landmarks: 单手关键点（第一只手），如果没有检测到则返回 None
         """
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.hands.process(rgb_frame)
@@ -40,9 +40,33 @@ class HandDetector:
             return results.multi_hand_landmarks[0]
         return None
 
+    def detect_all(self, frame):
+        """
+        检测所有手部关键点（支持双手）
+
+        Args:
+            frame: BGR 格式的图像帧
+
+        Returns:
+            list: 所有手部关键点列表，如果没有检测到则返回空列表
+        """
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.hands.process(rgb_frame)
+
+        if results.multi_hand_landmarks:
+            return results.multi_hand_landmarks
+        return []
+
     def draw_landmarks(self, frame, landmarks):
         """在图像上绘制手部骨架"""
         if landmarks:
+            self.mp_drawing.draw_landmarks(
+                frame, landmarks, self.mp_hands.HAND_CONNECTIONS
+            )
+
+    def draw_all_landmarks(self, frame, all_landmarks):
+        """在图像上绘制所有手部骨架"""
+        for landmarks in all_landmarks:
             self.mp_drawing.draw_landmarks(
                 frame, landmarks, self.mp_hands.HAND_CONNECTIONS
             )
