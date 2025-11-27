@@ -1,29 +1,29 @@
 """
 激活状态管理器 - 控制手势识别的激活/待机状态
+
+重构后：只负责激活/待机逻辑
+手势计时和动作触发由 GestureStateMachine 和 Actions 处理
 """
 
 import time
 from ..core.gestures import GestureType
-from ..config import CLAP_HOLD_TIME
 
 
 class ActivationManager:
-    """管理激活状态，减少误触发"""
+    """
+    管理激活状态，减少误触发
+
+    单一职责：只管理 激活/待机 状态切换
+    """
 
     ACTIVATION_TIME = 1.5      # 张开手掌激活所需时间（1.5秒）
     DEACTIVATION_TIME = 3.0    # 手离开后自动退出时间
-    COOLDOWN_TIME = 0.3        # 激活后的冷却时间
-    ACTION_HOLD_TIME = 0.5     # 动作需要保持的时间
 
     def __init__(self):
         self.is_activated = False
         self.palm_start_time = None
         self.hand_lost_time = None
-        self.activation_time = None
-        self.need_release = False
-        self.action_start_time = None
-        self.current_action_gesture = None
-        self.action_triggered = False  # 是否已触发动作（防连续触发）
+        self.need_release = False  # 激活后需要先松手才能操作
 
     def update(self, has_hand: bool, gesture: GestureType) -> dict:
         """
@@ -90,47 +90,4 @@ class ActivationManager:
 
         result['activated'] = self.is_activated
         return result
-
-    def check_action_hold(self, gesture_type) -> bool:
-        """检查握拳等动作是否保持足够时间"""
-        if gesture_type == GestureType.NONE:
-            self.current_action_gesture = None
-            self.action_start_time = None
-            return False
-
-        current_time = time.time()
-
-        if gesture_type != self.current_action_gesture:
-            self.current_action_gesture = gesture_type
-            self.action_start_time = current_time
-            return False
-
-        if current_time - self.action_start_time >= self.ACTION_HOLD_TIME:
-            self.action_start_time = current_time
-            return True
-
-        return False
-
-    def get_action_progress(self, gesture_type) -> float:
-        """获取当前动作的保持进度"""
-        if gesture_type != self.current_action_gesture or not self.action_start_time:
-            return 0
-        elapsed = time.time() - self.action_start_time
-        return min(elapsed / self.ACTION_HOLD_TIME, 1.0)
-
-    def get_hold_time(self, gesture_type) -> float:
-        """获取当前手势已保持的时间（秒）"""
-        if gesture_type != self.current_action_gesture or not self.action_start_time:
-            # 新手势，开始计时
-            self.current_action_gesture = gesture_type
-            self.action_start_time = time.time()
-            self.action_triggered = False
-            return 0
-        return time.time() - self.action_start_time
-
-    def reset_action(self):
-        """重置动作状态"""
-        self.action_start_time = None
-        self.current_action_gesture = None
-        self.action_triggered = False
 

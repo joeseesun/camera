@@ -4,8 +4,8 @@
 
 # ===== 摄像头配置 =====
 CAMERA_ID = 0
-CAMERA_WIDTH = 640
-CAMERA_HEIGHT = 480
+CAMERA_WIDTH = 320   # 小窗口模式：占屏幕角落
+CAMERA_HEIGHT = 240  # 从 640x480 缩小到 320x240
 
 # ===== 手势检测配置 =====
 MAX_NUM_HANDS = 2              # 支持双手检测（拍手手势需要）
