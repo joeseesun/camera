@@ -37,7 +37,7 @@ GESTURE_MAP = {
 class GestureRecognizer:
     """使用 MediaPipe Gesture Recognizer Task 的手势识别器"""
 
-    SMOOTHING_FRAMES = 4  # 连续 N 帧相同才确认
+    SMOOTHING_FRAMES = 3  # 平滑窗口：3 帧（从 4 降到 3，更快响应）
 
     def __init__(self, model_path='gesture_recognizer.task'):
         """初始化识别器"""
@@ -53,9 +53,9 @@ class GestureRecognizer:
             base_options=base_options,
             running_mode=vision.RunningMode.VIDEO,
             num_hands=1,
-            min_hand_detection_confidence=0.6,
-            min_hand_presence_confidence=0.6,
-            min_tracking_confidence=0.6,
+            min_hand_detection_confidence=0.5,  # 从 0.6 → 0.5，更容易检测到手
+            min_hand_presence_confidence=0.5,   # 从 0.6 → 0.5
+            min_tracking_confidence=0.5,        # 从 0.6 → 0.5
         )
         self.recognizer = vision.GestureRecognizer.create_from_options(options)
         self.frame_count = 0
@@ -89,35 +89,60 @@ class GestureRecognizer:
             confidence = top_gesture.score
             self.raw_confidence = confidence
 
-            # 置信度阈值 0.6
-            if confidence > 0.6 and gesture_name in GESTURE_MAP:
+            # 置信度阈值 0.5（从 0.6 降低，提高灵敏度）
+            if confidence > 0.5 and gesture_name in GESTURE_MAP:
                 raw_gesture = GESTURE_MAP[gesture_name]
 
         self.raw_gesture = raw_gesture
 
-        # 多帧平滑
+        # 多帧平滑 - 使用多数投票（好品味：不要求全部相同）
         self.gesture_history.append(raw_gesture)
         if len(self.gesture_history) >= self.SMOOTHING_FRAMES:
-            # 检查是否连续 N 帧相同
-            if all(g == raw_gesture for g in self.gesture_history):
-                self.confirmed_gesture = raw_gesture
-            elif raw_gesture == GestureType.NONE:
-                # 手离开时快速重置
+            # 统计最常出现的手势
+            from collections import Counter
+            gesture_counts = Counter(self.gesture_history)
+            most_common_gesture, count = gesture_counts.most_common(1)[0]
+
+            # 多数投票：至少 2/3 帧相同（3 帧中至少 2 帧）
+            if count >= (self.SMOOTHING_FRAMES * 2 // 3):
+                self.confirmed_gesture = most_common_gesture
+
+            # 手离开时快速重置（优先级更高）
+            if raw_gesture == GestureType.NONE:
                 self.confirmed_gesture = GestureType.NONE
 
         # 获取手部关键点
         if result.hand_landmarks and len(result.hand_landmarks) > 0:
             landmarks = result.hand_landmarks[0]
-            index_tip = landmarks[8]
-            palm = landmarks[9]
+            index_tip = landmarks[8]   # 食指尖
+            index_base = landmarks[5]  # 食指根部
+            wrist = landmarks[0]       # 手腕
+
+            # 判断手指方向
+            pointing_up = index_tip.y < index_base.y
+
+            # 检测单指伸出（用于向下指滚动）
+            # 食指伸出：指尖到手腕距离 > 指根到手腕距离
+            index_extended = self._distance(index_tip, wrist) > self._distance(index_base, wrist) * 1.1
+            # 其他手指收起（放宽条件）
+            middle_tip = landmarks[12]
+            middle_base = landmarks[9]
+            middle_folded = self._distance(middle_tip, wrist) < self._distance(middle_base, wrist) * 1.5
+
+            single_finger = index_extended and middle_folded
+
             points = {
                 'index_x': int(index_tip.x * frame_width),
                 'index_y': int(index_tip.y * frame_height),
-                'palm_x': palm.x,
-                'palm_y': palm.y,
+                'pointing_up': pointing_up,
+                'single_finger': single_finger,
             }
 
         return self.confirmed_gesture, points
+
+    def _distance(self, p1, p2) -> float:
+        """计算两点距离"""
+        return ((p1.x - p2.x)**2 + (p1.y - p2.y)**2) ** 0.5
 
     def get_debug_info(self):
         """返回调试信息"""

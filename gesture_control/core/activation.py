@@ -16,7 +16,7 @@ class ActivationManager:
     单一职责：只管理 激活/待机 状态切换
     """
 
-    ACTIVATION_TIME = 1.5      # 张开手掌激活所需时间（1.5秒）
+    ACTIVATION_TIME = 1.0      # 张开手掌激活所需时间（1秒）
     DEACTIVATION_TIME = 3.0    # 手离开后自动退出时间
 
     def __init__(self):
